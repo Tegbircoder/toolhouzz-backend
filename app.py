@@ -6,7 +6,21 @@ import csv
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+
+# UPDATED CORS - Allow all toolhouzz.com variations
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:5500",
+            "http://toolhouzz.com",
+            "https://toolhouzz.com",
+            "http://www.toolhouzz.com",
+            "https://www.toolhouzz.com"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+})
 
 @app.route('/')
 def home():
@@ -115,7 +129,7 @@ def health():
     return jsonify({'status': 'healthy'}), 200
 
 if __name__ == '__main__':
-    # Render will use the PORT environment variable
+    # Fly.io will use the PORT environment variable
     import os
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
