@@ -19,18 +19,3 @@ primary_region = "sea"
   cpu_kind = "shared"
   cpus = 1
   memory_mb = 256
-```
-
-5. **Commit:** "Added fly.toml for Fly.io deployment"
-
----
-
-#### File 2: Create `Procfile`
-
-1. **Still on GitHub, click:** "Add file" → "Create new file"
-
-2. **Filename:** `Procfile`
-
-3. **Content:** Just this one line:
-```
-web: gunicorn app:app --bind 0.0.0.0:$PORT
