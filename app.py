@@ -32,10 +32,11 @@ def search_jobs():
         if not data:
             return jsonify({'error': 'No data provided'}), 400
         
-        job_title = data.get('job_title', '').strip()
+        # FIXED: Handle None values properly
+        job_title = (data.get('job_title') or '').strip()
         job_age = data.get('job_age', 15)
-        city = data.get('city', '').strip()
-        country = data.get('country', '').strip()
+        city = (data.get('city') or '').strip()
+        country = (data.get('country') or '').strip()
         
         # Validate required fields
         if not job_title:
