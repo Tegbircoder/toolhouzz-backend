@@ -1,120 +1,103 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import job_search_module
 import io
 import csv
 from datetime import datetime
+import os
+
+import job_search_module as jobs
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+CORS(app)  # allow all origins by default; tighten later if you want
 
-@app.route('/')
-def home():
+@app.route("/")
+def root():
     return jsonify({
-        'message': 'ToolHouzz Job Search API',
-        'status': 'running',
-        'version': '1.0',
-        'endpoints': {
-            '/search': 'POST - Search for jobs across 23+ portals'
+        "name": "ToolHouzz Job Search API",
+        "status": "running",
+        "version": "1.0",
+        "endpoints": {
+            "health": "/health",
+            "search (POST)": "/search"
         }
     })
 
-@app.route('/search', methods=['POST', 'OPTIONS'])
-def search_jobs():
-    # Handle preflight CORS request
-    if request.method == 'OPTIONS':
-        return '', 204
-    
+@app.route("/health")
+def health():
+    return jsonify({"status": "healthy"}), 200
+
+@app.route("/search", methods=["POST"])
+def search():
+    """
+    Body JSON:
+    {
+      "job_title": "Business Analyst",
+      "city": "Toronto",
+      "country": "Canada",
+      "job_age": 15   # (days) optional
+    }
+    Returns: CSV file with results (at minimum: smart search links for major sites).
+    """
     try:
-        # Get request data
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-        
-        job_title = data.get('job_title', '').strip()
-        job_age = data.get('job_age', 15)
-        city = data.get('city', '').strip()
-        country = data.get('country', '').strip()
-        
-        # Validate required fields
+        payload = request.get_json(force=True, silent=False) or {}
+        job_title = (payload.get("job_title") or "").strip()
+        city = (payload.get("city") or "").strip()
+        country = (payload.get("country") or "").strip()
+        job_age = int(payload.get("job_age") or 15)
+
         if not job_title:
-            return jsonify({'error': 'Job title is required'}), 400
-        
-        if not country:
-            return jsonify({'error': 'Country is required'}), 400
-        
-        # Convert job_age to integer
-        try:
-            job_age = int(job_age)
-        except (ValueError, TypeError):
-            job_age = 15
-        
-        # Build location string
-        location = f"{city}, {country}" if city else country
-        
-        print(f"[INFO] Searching for: {job_title} in {location} (last {job_age} days)")
-        
-        # Perform the job search
-        results = job_search_module.search_all_portals(
-            job_title=job_title,
-            location=location,
-            job_age=job_age
-        )
-        
-        if not results or len(results) == 0:
-            return jsonify({'error': 'No jobs found. Try different search terms.'}), 404
-        
-        print(f"[SUCCESS] Found {len(results)} jobs")
-        
-        # Create CSV in memory
+            return jsonify({"error": "job_title is required"}), 400
+        if not country and not city:
+            return jsonify({"error": "Provide at least country or city"}), 400
+
+        location = f"{city}, {country}".strip(", ").strip()
+
+        # Run the aggregator (links + light scraping-safe metadata)
+        results = jobs.search_all_portals(job_title=job_title,
+                                          location=location,
+                                          job_age=job_age)
+
+        # Always return a CSV (even if only search links)
         output = io.StringIO()
         writer = csv.writer(output)
-        
-        # Write header
-        writer.writerow(['Date', 'Source', 'Company', 'Job Title', 'Location', 'URL', 'Detected Term', 'Posted (UTC)'])
-        
-        # Write data
-        for job in results:
+        writer.writerow([
+            "Date",
+            "Source",
+            "Type",
+            "Company",
+            "Job Title",
+            "Location",
+            "URL",
+            "Notes"
+        ])
+
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        for row in results:
             writer.writerow([
-                job.get('date', ''),
-                job.get('source', ''),
-                job.get('company', 'N/A'),
-                job.get('title', ''),
-                job.get('location', ''),
-                job.get('url', ''),
-                job.get('detected_term', job_title),
-                job.get('posted_utc', '')
+                row.get("date") or today,
+                row.get("source") or "",
+                row.get("type") or "link",
+                row.get("company") or "",
+                row.get("title") or job_title,
+                row.get("location") or location,
+                row.get("url") or "",
+                row.get("notes") or ""
             ])
-        
-        # Convert to bytes
-        output.seek(0)
-        csv_bytes = io.BytesIO(output.getvalue().encode('utf-8'))
-        csv_bytes.seek(0)
-        
-        # Generate filename
-        timestamp = datetime.now().strftime('%Y-%m-%d')
-        filename = f"jobs_{job_title.replace(' ', '_')}_{timestamp}.csv"
-        
-        return send_file(
-            csv_bytes,
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=filename
-        )
-    
+
+        mem = io.BytesIO(output.getvalue().encode("utf-8"))
+        mem.seek(0)
+
+        filename = f"jobs_{job_title.replace(' ', '_')}_{today}.csv"
+        return send_file(mem,
+                         mimetype="text/csv",
+                         as_attachment=True,
+                         download_name=filename)
+
     except Exception as e:
-        print(f"[ERROR] {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': f'Server error: {str(e)}'}), 500
+        # Print server-side for Render logs
+        print("[/search] ERROR:", repr(e))
+        return jsonify({"error": f"Server error: {str(e)}"}), 500
 
-@app.route('/health')
-def health():
-    return jsonify({'status': 'healthy'}), 200
-
-if __name__ == '__main__':
-    # Render will use the PORT environment variable
-    import os
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
