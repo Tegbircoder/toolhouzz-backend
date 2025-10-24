@@ -1,5 +1,5 @@
 app = "toolhouzz-backend"
-primary_region = "sea"
+primary_region = "yyz"
 
 [build]
   builder = "paketobuildpacks/builder:base"
