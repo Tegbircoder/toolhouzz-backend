@@ -1,271 +1,126 @@
-import time
+import requests
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import urllib.parse
 
-def create_driver():
-    """Create a headless Chrome driver for automation"""
-    chrome_options = Options()
-    
-    # Headless mode (no visible browser)
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1920,1080')
-    
-    # Anti-detection measures
-    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    # User agent
-    chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    
-    driver = webdriver.Chrome(options=chrome_options)
-    
-    # Execute script to hide automation
-    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    
-    return driver
+# Adzuna API credentials
+ADZUNA_APP_ID = 98fe5840  # Replace with your actual app_id
+ADZUNA_API_KEY = d968bfc5a0fd5bf7773bc54fbfa36a7d	  # Replace with your actual api_key
 
-def scrape_linkedin_jobs(driver, job_title, location, max_jobs=20):
-    """Scrape LinkedIn jobs with browser automation"""
+def search_adzuna_jobs(job_title, location, max_results=50):
+    """
+    Search jobs using Adzuna API (FREE - 500 searches/month)
+    Covers: Indeed, Monster, Glassdoor, CareerBuilder, and 50+ sites!
+    """
     jobs = []
-    encoded_title = urllib.parse.quote(job_title)
-    encoded_location = urllib.parse.quote(location)
     
-    url = f'https://www.linkedin.com/jobs/search/?keywords={encoded_title}&location={encoded_location}&f_TPR=r604800'
+    # Determine country code based on location
+    if "canada" in location.lower() or "ca" in location.lower():
+        country = "ca"
+    elif "uk" in location.lower() or "united kingdom" in location.lower():
+        country = "gb"
+    elif "australia" in location.lower() or "au" in location.lower():
+        country = "au"
+    elif "usa" in location.lower() or "united states" in location.lower() or "us" in location.lower():
+        country = "us"
+    else:
+        country = "ca"  # Default to Canada
+    
+    print(f"\n{'='*60}")
+    print(f"🔍 Searching Adzuna API for: {job_title}")
+    print(f"📍 Location: {location} (Country: {country.upper()})")
+    print(f"{'='*60}\n")
     
     try:
-        print(f"[LinkedIn] Opening browser and navigating...")
-        driver.get(url)
+        # Adzuna API endpoint
+        url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/1"
         
-        # Wait for job cards to load
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "job-search-card"))
-        )
+        params = {
+            'app_id': ADZUNA_APP_ID,
+            'app_key': ADZUNA_API_KEY,
+            'results_per_page': max_results,
+            'what': job_title,
+            'where': location,
+            'max_days_old': 15,
+            'sort_by': 'date'
+        }
         
-        print(f"[LinkedIn] Extracting job data...")
+        print(f"[Adzuna] Making API request...")
+        response = requests.get(url, params=params, timeout=10)
         
-        # Scroll to load more jobs
-        for i in range(3):
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(1)
+        if response.status_code != 200:
+            print(f"[Adzuna] ❌ API Error: Status {response.status_code}")
+            print(f"[Adzuna] Response: {response.text}")
+            return generate_search_links(job_title, location)
         
-        # Find all job cards
-        job_cards = driver.find_elements(By.CLASS_NAME, "job-search-card")[:max_jobs]
+        data = response.json()
+        results = data.get('results', [])
         
-        for card in job_cards:
+        print(f"[Adzuna] ✅ Found {len(results)} jobs from Adzuna API!")
+        print(f"[Adzuna] (Sources: Indeed, Monster, Glassdoor, CareerBuilder, etc.)\n")
+        
+        for job in results:
             try:
-                # Extract title
-                try:
-                    title_elem = card.find_element(By.CLASS_NAME, "base-search-card__title")
-                    title = title_elem.text.strip()
-                except:
-                    title = "N/A"
+                # Extract job details
+                title = job.get('title', 'N/A')
+                company = job.get('company', {}).get('display_name', 'N/A')
+                job_location = job.get('location', {}).get('display_name', location)
+                job_url = job.get('redirect_url', '')
+                description = job.get('description', '')[:200] + '...'
                 
-                # Extract company
-                try:
-                    company_elem = card.find_element(By.CLASS_NAME, "base-search-card__subtitle")
-                    company = company_elem.text.strip()
-                except:
-                    company = "N/A"
-                
-                # Extract location
-                try:
-                    location_elem = card.find_element(By.CLASS_NAME, "job-search-card__location")
-                    job_location = location_elem.text.strip()
-                except:
-                    job_location = location
-                
-                # Extract URL
-                try:
-                    link_elem = card.find_element(By.CLASS_NAME, "base-card__full-link")
-                    job_url = link_elem.get_attribute("href")
-                except:
-                    job_url = url
+                # Salary info (if available)
+                salary_min = job.get('salary_min')
+                salary_max = job.get('salary_max')
+                salary_str = ''
+                if salary_min and salary_max:
+                    salary_str = f"${salary_min:,.0f}-${salary_max:,.0f}"
+                elif salary_min:
+                    salary_str = f"${salary_min:,.0f}+"
                 
                 jobs.append({
                     'date': datetime.now().strftime('%m/%d/%Y'),
-                    'source': 'LinkedIn',
+                    'source': 'Adzuna',
                     'company': company,
                     'title': title,
                     'location': job_location,
                     'url': job_url,
+                    'salary': salary_str,
+                    'description': description,
                     'detected_term': job_title,
                     'posted_utc': datetime.utcnow().isoformat()
                 })
                 
             except Exception as e:
-                print(f"[LinkedIn] Error extracting job: {str(e)}")
+                print(f"[Adzuna] Warning: Error parsing job: {str(e)}")
                 continue
         
-        print(f"[LinkedIn] ✓ Extracted {len(jobs)} jobs")
+        print(f"[Adzuna] ✅ Successfully extracted {len(jobs)} jobs!\n")
         
+    except requests.Timeout:
+        print(f"[Adzuna] ❌ Request timed out")
+        return generate_search_links(job_title, location)
     except Exception as e:
-        print(f"[LinkedIn] ✗ Error: {str(e)}")
+        print(f"[Adzuna] ❌ Error: {str(e)}")
+        return generate_search_links(job_title, location)
     
-    return jobs
-
-def scrape_indeed_jobs(driver, job_title, location, max_jobs=20):
-    """Scrape Indeed jobs with browser automation"""
-    jobs = []
-    encoded_title = urllib.parse.quote(job_title)
-    encoded_location = urllib.parse.quote(location)
-    
-    url = f'https://ca.indeed.com/jobs?q={encoded_title}&l={encoded_location}&fromage=15'
-    
-    try:
-        print(f"[Indeed] Opening browser and navigating...")
-        driver.get(url)
-        
-        # Wait for job cards to load
-        time.sleep(3)
-        
-        print(f"[Indeed] Extracting job data...")
-        
-        # Find all job cards
-        job_cards = driver.find_elements(By.CLASS_NAME, "job_seen_beacon")[:max_jobs]
-        
-        for card in job_cards:
-            try:
-                # Extract title
-                try:
-                    title_elem = card.find_element(By.CSS_SELECTOR, "h2.jobTitle span")
-                    title = title_elem.text.strip()
-                except:
-                    title = "N/A"
-                
-                # Extract company
-                try:
-                    company_elem = card.find_element(By.CSS_SELECTOR, "span[data-testid='company-name']")
-                    company = company_elem.text.strip()
-                except:
-                    company = "N/A"
-                
-                # Extract location
-                try:
-                    location_elem = card.find_element(By.CSS_SELECTOR, "div[data-testid='text-location']")
-                    job_location = location_elem.text.strip()
-                except:
-                    job_location = location
-                
-                # Extract URL
-                try:
-                    link_elem = card.find_element(By.CSS_SELECTOR, "h2.jobTitle a")
-                    job_url = "https://ca.indeed.com" + link_elem.get_attribute("href")
-                except:
-                    job_url = url
-                
-                jobs.append({
-                    'date': datetime.now().strftime('%m/%d/%Y'),
-                    'source': 'Indeed',
-                    'company': company,
-                    'title': title,
-                    'location': job_location,
-                    'url': job_url,
-                    'detected_term': job_title,
-                    'posted_utc': datetime.utcnow().isoformat()
-                })
-                
-            except Exception as e:
-                print(f"[Indeed] Error extracting job: {str(e)}")
-                continue
-        
-        print(f"[Indeed] ✓ Extracted {len(jobs)} jobs")
-        
-    except Exception as e:
-        print(f"[Indeed] ✗ Error: {str(e)}")
-    
-    return jobs
-
-def scrape_glassdoor_jobs(driver, job_title, location, max_jobs=20):
-    """Scrape Glassdoor jobs with browser automation"""
-    jobs = []
-    encoded_title = urllib.parse.quote(job_title)
-    
-    url = f'https://www.glassdoor.ca/Job/jobs.htm?sc.keyword={encoded_title}&locT=N&locId=3&fromAge=15'
-    
-    try:
-        print(f"[Glassdoor] Opening browser and navigating...")
-        driver.get(url)
-        
-        # Wait for job cards to load
-        time.sleep(5)
-        
-        print(f"[Glassdoor] Extracting job data...")
-        
-        # Find all job cards - Glassdoor uses different selectors
-        job_cards = driver.find_elements(By.CSS_SELECTOR, "li[data-test='jobListing']")[:max_jobs]
-        
-        for card in job_cards:
-            try:
-                # Extract title
-                try:
-                    title_elem = card.find_element(By.CSS_SELECTOR, "a[data-test='job-title']")
-                    title = title_elem.text.strip()
-                except:
-                    title = "N/A"
-                
-                # Extract company
-                try:
-                    company_elem = card.find_element(By.CSS_SELECTOR, "div[data-test='employer-name']")
-                    company = company_elem.text.strip()
-                except:
-                    company = "N/A"
-                
-                # Extract location
-                try:
-                    location_elem = card.find_element(By.CSS_SELECTOR, "div[data-test='emp-location']")
-                    job_location = location_elem.text.strip()
-                except:
-                    job_location = location
-                
-                # Extract URL
-                try:
-                    link_elem = card.find_element(By.CSS_SELECTOR, "a[data-test='job-title']")
-                    job_url = "https://www.glassdoor.ca" + link_elem.get_attribute("href")
-                except:
-                    job_url = url
-                
-                jobs.append({
-                    'date': datetime.now().strftime('%m/%d/%Y'),
-                    'source': 'Glassdoor',
-                    'company': company,
-                    'title': title,
-                    'location': job_location,
-                    'url': job_url,
-                    'detected_term': job_title,
-                    'posted_utc': datetime.utcnow().isoformat()
-                })
-                
-            except Exception as e:
-                print(f"[Glassdoor] Error extracting job: {str(e)}")
-                continue
-        
-        print(f"[Glassdoor] ✓ Extracted {len(jobs)} jobs")
-        
-    except Exception as e:
-        print(f"[Glassdoor] ✗ Error: {str(e)}")
+    # Add search links for additional portals not in Adzuna
+    print(f"[Links] Adding search links for additional portals...\n")
+    additional_links = generate_search_links(job_title, location)
+    jobs.extend(additional_links)
     
     return jobs
 
 def generate_search_links(job_title, location):
-    """Generate search links for portals we don't scrape"""
+    """
+    Generate direct search links for job portals
+    """
     encoded_title = urllib.parse.quote(job_title)
     encoded_location = urllib.parse.quote(location)
     
     portals = {
-        'Monster': f'https://www.monster.com/jobs/search/?q={encoded_title}&where={encoded_location}&dy=15',
+        'LinkedIn': f'https://www.linkedin.com/jobs/search/?keywords={encoded_title}&location={encoded_location}&f_TPR=r604800',
+        'JobBank': f'https://www.jobbank.gc.ca/jobsearch/jobsearch?searchstring={encoded_title}&locationstring={encoded_location}',
         'ZipRecruiter': f'https://www.ziprecruiter.com/jobs-search?search={encoded_title}&location={encoded_location}&days=15',
         'SimplyHired': f'https://www.simplyhired.com/search?q={encoded_title}&l={encoded_location}&fdb=15',
-        'JobBank': f'https://www.jobbank.gc.ca/jobsearch/jobsearch?searchstring={encoded_title}&locationstring={encoded_location}',
         'Workopolis': f'https://www.workopolis.com/jobsearch/jobs?ak={encoded_title}&l={encoded_location}',
     }
     
@@ -278,6 +133,8 @@ def generate_search_links(job_title, location):
             'title': f'Search {portal_name} for "{job_title}"',
             'location': location,
             'url': portal_url,
+            'salary': '',
+            'description': '',
             'detected_term': job_title,
             'posted_utc': datetime.utcnow().isoformat()
         })
@@ -285,79 +142,52 @@ def generate_search_links(job_title, location):
     return jobs
 
 def search_all_portals(job_title, location, job_age=15):
-    """Main function to search all portals with browser automation"""
+    """
+    Main search function - uses Adzuna API
+    """
     print(f"\n{'='*60}")
-    print(f"Starting BROWSER AUTOMATION job search for: {job_title}")
+    print(f"🚀 ADZUNA API JOB SEARCH")
+    print(f"Job Title: {job_title}")
     print(f"Location: {location}")
-    print(f"Job age: Last {job_age} days")
+    print(f"Job Age: Last {job_age} days")
     print(f"{'='*60}\n")
     
-    all_jobs = []
-    
-    try:
-        # Create browser driver
-        print("[BROWSER] Creating Chrome driver...")
-        driver = create_driver()
-        
-        # Scrape LinkedIn
-        print("[BROWSER] Scraping LinkedIn...")
-        linkedin_jobs = scrape_linkedin_jobs(driver, job_title, location)
-        all_jobs.extend(linkedin_jobs)
-        time.sleep(2)
-        
-        # Scrape Indeed
-        print("[BROWSER] Scraping Indeed...")
-        indeed_jobs = scrape_indeed_jobs(driver, job_title, location)
-        all_jobs.extend(indeed_jobs)
-        time.sleep(2)
-        
-        # Scrape Glassdoor
-        print("[BROWSER] Scraping Glassdoor...")
-        glassdoor_jobs = scrape_glassdoor_jobs(driver, job_title, location)
-        all_jobs.extend(glassdoor_jobs)
-        
-        # Close browser
-        print("[BROWSER] Closing browser...")
-        driver.quit()
-        
-    except Exception as e:
-        print(f"[BROWSER] Error: {str(e)}")
-        try:
-            driver.quit()
-        except:
-            pass
-    
-    # Add search links for other portals
-    print("[LINKS] Adding search links for other portals...")
-    search_links = generate_search_links(job_title, location)
-    all_jobs.extend(search_links)
+    # Search using Adzuna API
+    all_jobs = search_adzuna_jobs(job_title, location, max_results=50)
     
     print(f"\n{'='*60}")
-    print(f"Search complete! Total results: {len(all_jobs)}")
-    scraped_count = sum(1 for job in all_jobs if job['company'] != '🔗 Click to Search')
-    link_count = len(all_jobs) - scraped_count
-    print(f"Automated scraping: {scraped_count} jobs")
-    print(f"Search links: {link_count} portals")
+    print(f"✅ SEARCH COMPLETE!")
+    print(f"📊 Total Results: {len(all_jobs)}")
+    
+    adzuna_count = sum(1 for job in all_jobs if job['source'] == 'Adzuna')
+    link_count = len(all_jobs) - adzuna_count
+    
+    print(f"   - Adzuna API jobs: {adzuna_count}")
+    print(f"   - Search links: {link_count}")
     print(f"{'='*60}\n")
     
     return all_jobs
 
 def test_search():
-    """Test function"""
+    """Test function for local testing"""
     results = search_all_portals(
         job_title="Data Analyst",
         location="Toronto, Canada",
         job_age=15
     )
     
-    print(f"\nTotal results: {len(results)}")
+    print(f"\n📊 RESULTS SUMMARY:")
+    print(f"Total jobs: {len(results)}")
     
     if results:
-        print("\nFirst 5 results:")
+        print(f"\n✅ First 5 results:")
         for i, job in enumerate(results[:5], 1):
             print(f"\n{i}. {job['title']}")
             print(f"   Company: {job['company']}")
+            print(f"   Location: {job['location']}")
             print(f"   Source: {job['source']}")
+            if job.get('salary'):
+                print(f"   Salary: {job['salary']}")
 
 if __name__ == '__main__':
     test_search()
