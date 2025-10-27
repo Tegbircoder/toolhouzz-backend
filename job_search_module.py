@@ -152,6 +152,7 @@ def scrape_generic_jobs(url, source_name):
 def search_all_portals(job_title, location, job_age=15):
     """
     Search all 23+ job portals and return combined results.
+    HYBRID APPROACH: Scrape working portals + provide search links for blocked ones.
     """
     print(f"\n{'='*60}")
     print(f"Starting job search for: {job_title}")
@@ -169,50 +170,50 @@ def search_all_portals(job_title, location, job_age=15):
         try:
             jobs = scrape_generic_jobs(portal_url, portal_name)
             
-            if jobs:
+            if jobs and len(jobs) > 0:
                 print(f"[{portal_name}] ✓ Found {len(jobs)} jobs")
                 for job in jobs:
                     job['detected_term'] = job_title
                 all_jobs.extend(jobs)
             else:
-                print(f"[{portal_name}] ✗ No jobs found")
+                # No jobs found via scraping - ADD SEARCH LINK INSTEAD
+                print(f"[{portal_name}] ✗ Blocked/No scraping - Adding search link")
+                all_jobs.append({
+                    'date': datetime.now().strftime('%Y-%m-%d'),
+                    'source': portal_name,
+                    'company': '🔗 Click to Search',
+                    'title': f'Search {portal_name} for "{job_title}"',
+                    'location': location,
+                    'url': portal_url,
+                    'detected_term': job_title,
+                    'posted_utc': datetime.utcnow().isoformat()
+                })
             
             # Small delay to avoid rate limiting
             time.sleep(0.5)
             
         except Exception as e:
-            print(f"[{portal_name}] Error: {str(e)}")
-            continue
-    
-    print(f"\n{'='*60}")
-    print(f"Search complete! Total jobs found: {len(all_jobs)}")
-    print(f"{'='*60}\n")
-    
-    # If no results from scraping, create placeholder results
-    if len(all_jobs) == 0:
-        print("[INFO] Creating sample results since no jobs were scraped...")
-        
-        # Generate direct search URLs for major portals
-        all_jobs = []
-        major_portals = {
-            'LinkedIn': f'https://www.linkedin.com/jobs/search/?keywords={urllib.parse.quote(job_title)}&location={urllib.parse.quote(location)}',
-            'Indeed': f'https://www.indeed.com/jobs?q={urllib.parse.quote(job_title)}&l={urllib.parse.quote(location)}',
-            'Glassdoor': f'https://www.glassdoor.com/Job/jobs.htm?sc.keyword={urllib.parse.quote(job_title)}',
-            'Monster': f'https://www.monster.com/jobs/search/?q={urllib.parse.quote(job_title)}&where={urllib.parse.quote(location)}',
-            'ZipRecruiter': f'https://www.ziprecruiter.com/jobs-search?search={urllib.parse.quote(job_title)}&location={urllib.parse.quote(location)}',
-        }
-        
-        for portal_name, url in major_portals.items():
+            print(f"[{portal_name}] Error: {str(e)} - Adding search link")
+            # Error occurred - ADD SEARCH LINK INSTEAD
             all_jobs.append({
                 'date': datetime.now().strftime('%Y-%m-%d'),
                 'source': portal_name,
-                'company': 'Visit Portal',
-                'title': f'{job_title} - Click URL to search {portal_name}',
+                'company': '🔗 Click to Search',
+                'title': f'Search {portal_name} for "{job_title}"',
                 'location': location,
-                'url': url,
+                'url': portal_url,
                 'detected_term': job_title,
                 'posted_utc': datetime.utcnow().isoformat()
             })
+            continue
+    
+    print(f"\n{'='*60}")
+    print(f"Search complete! Total results: {len(all_jobs)}")
+    scraped_count = sum(1 for job in all_jobs if job['company'] != '🔗 Click to Search')
+    link_count = len(all_jobs) - scraped_count
+    print(f"Scraped jobs: {scraped_count}")
+    print(f"Search links: {link_count}")
+    print(f"{'='*60}\n")
     
     return all_jobs
 
