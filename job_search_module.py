@@ -3,8 +3,8 @@ from datetime import datetime
 import urllib.parse
 
 # Adzuna API credentials
-ADZUNA_APP_ID = 98fe5840  # Replace with your actual app_id
-ADZUNA_API_KEY = d968bfc5a0fd5bf7773bc54fbfa36a7d	  # Replace with your actual api_key
+ADZUNA_APP_ID = "98fe5840"  # Replace with your actual app_id
+ADZUNA_API_KEY = "d968bfc5a0fd5bf7773bc54fbfa36a7d"	  # Replace with your actual api_key
 
 def search_adzuna_jobs(job_title, location, max_results=50):
     """
